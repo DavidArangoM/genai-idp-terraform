@@ -418,7 +418,7 @@ resource "aws_kms_key" "encryption_key" {
         Sid    = "Enable IAM User Permissions"
         Effect = "Allow"
         Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+          AWS = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
         }
         Action   = "kms:*"
         Resource = "*"
@@ -439,7 +439,7 @@ resource "aws_kms_key" "encryption_key" {
         Resource = "*"
         Condition = {
           ArnEquals = {
-            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:*"
+            "kms:EncryptionContext:aws:logs:arn" = "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:*"
           }
         }
       }
@@ -508,6 +508,35 @@ locals {
   config_file_path = var.config_file_path
   config_yaml      = file(local.config_file_path)
   config           = yamldecode(local.config_yaml)
+
+  # Backward compatibility: merge old individual variables with new api structure
+  # New api variable takes precedence when both are provided
+  api_config = var.api.enabled || var.discovery != null || var.chat_with_document != null || var.process_changes != null ? {
+    enabled = var.api.enabled || var.discovery != null || var.chat_with_document != null || var.process_changes != null
+    
+    agent_analytics = var.api.agent_analytics
+    
+    discovery = var.api.enabled ? var.api.discovery : (
+      var.discovery != null ? var.discovery : { enabled = false }
+    )
+    
+    chat_with_document = var.api.enabled ? var.api.chat_with_document : (
+      var.chat_with_document != null ? var.chat_with_document : { enabled = false }
+    )
+    
+    process_changes = var.api.enabled ? var.api.process_changes : (
+      var.process_changes != null ? var.process_changes : { enabled = false }
+    )
+    
+    knowledge_base = var.api.knowledge_base
+  } : {
+    enabled = false
+    agent_analytics = { enabled = false }
+    discovery = { enabled = false }
+    chat_with_document = { enabled = false }
+    process_changes = { enabled = false }
+    knowledge_base = { enabled = false }
+  }
 }
 
 # Deploy the GenAI IDP Accelerator with Bedrock LLM processor
@@ -522,7 +551,6 @@ module "genai_idp_accelerator" {
       enabled  = var.summarization_enabled
       model_id = var.summarization_model_id
     }
-    enable_assessment = var.enable_assessment
     config            = local.config
   }
 
@@ -539,7 +567,7 @@ module "genai_idp_accelerator" {
   # Evaluation configuration
   evaluation = var.enable_evaluation ? {
     enabled             = true
-    model_id            = var.evaluation_model_id
+    model_id            = var.evaluation_model_id != null ? var.evaluation_model_id : "us.anthropic.claude-3-haiku-20240307-v1:0"
     baseline_bucket_arn = aws_s3_bucket.evaluation_baseline_bucket[0].arn
   } : { enabled = false }
 
@@ -550,8 +578,17 @@ module "genai_idp_accelerator" {
     database_name = aws_glue_catalog_database.reporting_database[0].name
   } : { enabled = false }
 
+  # API configuration (consolidated structure)
+  api = local.api_config
+
+  # Chat with Document configuration (backward compatibility)
+  chat_with_document = local.api_config.chat_with_document
+
+  # Process Changes configuration (backward compatibility)  
+  process_changes = local.api_config.process_changes
+
   # Feature flags
-  enable_api = false
+  enable_api = local.api_config.enabled
 
   # Web UI configuration (disabled)
   web_ui = {

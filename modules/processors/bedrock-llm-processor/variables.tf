@@ -114,6 +114,17 @@ variable "classification_max_workers" {
   default     = 20
 }
 
+variable "max_pages_for_classification" {
+  description = "Maximum number of pages to use for classification. Set to 'ALL' to use all pages, or a numeric value to limit."
+  type        = string
+  default     = "ALL"
+
+  validation {
+    condition     = var.max_pages_for_classification == "ALL" || can(tonumber(var.max_pages_for_classification))
+    error_message = "max_pages_for_classification must be 'ALL' or a numeric value."
+  }
+}
+
 variable "classification_guardrail" {
   description = "Optional Bedrock guardrail to apply to classification model interactions"
   type = object({
@@ -189,8 +200,10 @@ variable "config" {
   default     = null
 }
 
-variable "enable_assessment" {
-  description = "Whether to enable the assessment function for document quality assessment"
+
+
+variable "enable_hitl" {
+  description = "Whether to enable Human-in-the-Loop (HITL) functionality for document review"
   type        = bool
   default     = false
 }

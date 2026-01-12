@@ -20,7 +20,7 @@ The IDP Common library provides these main modules:
 - **[AppSync](appsync/README.md)**: Document storage through GraphQL API
 - **[Reporting](reporting/README.md)**: Analytics data storage
 
-## Key Classes
+## 🗃️ Key Classes
 
 ### Document
 
@@ -83,7 +83,6 @@ class Page:
 ```
 
 **Key URIs:**
-
 - `image_uri`: S3 URI to the page image (JPG format)
 - `raw_text_uri`: S3 URI to the raw Textract response (full JSON with all metadata)
 - `parsed_text_uri`: S3 URI to the parsed text content (markdown format)
@@ -123,7 +122,7 @@ class Status(Enum):
     FAILED = "FAILED"           # Processing failed
 ```
 
-## Document Compression for Large Documents
+## 📦 Document Compression for Large Documents
 
 The Document class includes automatic compression support to handle large documents that exceed Step Functions payload limits (256KB). This is essential for processing multi-page documents with extensive content.
 
@@ -168,7 +167,7 @@ response_data = document.serialize_document(
 - **Transparent Handling**: Lambda functions work seamlessly with both compressed and uncompressed documents
 - **S3 Storage**: Compressed documents are stored in `s3://working-bucket/compressed_documents/{document_id}/`
 
-## Common Operations
+## 🔄 Common Operations
 
 ### Document Creation
 
@@ -231,7 +230,7 @@ document.pages["new-page"] = Page(
 )
 ```
 
-## Building a Document from Scratch Example
+## 🛠️ Building a Document from Scratch Example
 
 ```python
 from idp_common.models import Document, Page, Section, Status
@@ -277,7 +276,7 @@ document.sections.append(Section(
 ))
 ```
 
-## Loading a Document for Evaluation Example
+## 📊 Loading a Document for Evaluation Example
 
 ```python
 from idp_common.models import Document
@@ -322,7 +321,7 @@ appsync_service = appsync.DocumentAppSyncService()
 document = appsync_service.update_document(document)
 ```
 
-## Best Practices
+## 📝 Best Practices
 
 1. **Always use the Document.load_document() method** to handle input data in Lambda functions
 2. **Always use document.serialize_document()** to prepare output data

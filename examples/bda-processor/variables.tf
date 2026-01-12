@@ -46,12 +46,66 @@ variable "data_tracking_retention_days" {
   default     = 365
 }
 
-# Feature flags
-variable "enable_api" {
-  description = "Enable GraphQL API for programmatic access and notifications"
-  type        = bool
-  default     = true
+# API Configuration (Consolidated)
+variable "api" {
+  description = "Configuration for GraphQL API and all API-related features"
+  type = object({
+    # Core API configuration
+    enabled = optional(bool, true)
+
+    # Agent Analytics (GraphQL resolvers for agent functionality)
+    agent_analytics = optional(object({
+      enabled  = optional(bool, false)
+      model_id = optional(string, "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+    }), { enabled = false })
+
+    # Discovery (Document discovery and classification workflow)
+    discovery = optional(object({
+      enabled = optional(bool, false)
+    }), { enabled = false })
+
+    # Chat with Document (Document Q&A using Bedrock and Knowledge Base)
+    chat_with_document = optional(object({
+      enabled                  = optional(bool, false)
+      guardrail_id_and_version = optional(string, null)
+    }), { enabled = false })
+
+    # Process Changes (Document editing and reprocessing)
+    process_changes = optional(object({
+      enabled = optional(bool, false)
+    }), { enabled = false })
+
+    # Knowledge Base (external dependency for chat feature)
+    knowledge_base = optional(object({
+      enabled            = optional(bool, false)
+      knowledge_base_arn = optional(string)
+      model_id           = optional(string, "us.amazon.nova-pro-v1:0")
+      embedding_model_id = optional(string, "amazon.titan-embed-text-v2:0")
+    }), { enabled = false })
+  })
+
+  default = {
+    enabled            = true
+    agent_analytics    = { enabled = false }
+    discovery          = { enabled = false }
+    chat_with_document = { enabled = false }
+    process_changes    = { enabled = false }
+    knowledge_base     = { enabled = true } # Enable by default for BDA example
+  }
+
+  validation {
+    condition     = !var.api.chat_with_document.enabled || var.api.knowledge_base.enabled
+    error_message = "When api.chat_with_document.enabled is true, api.knowledge_base.enabled must also be true."
+  }
+
+  validation {
+    condition     = !var.api.agent_analytics.enabled || var.api.agent_analytics.model_id != null
+    error_message = "When api.agent_analytics.enabled is true, model_id must be provided."
+  }
 }
+
+# DEPRECATED: Individual API feature variables (use 'api' variable instead)
+# These are kept for backward compatibility and will be removed in a future version
 
 variable "web_ui" {
   description = "Web UI configuration object"
@@ -110,6 +164,48 @@ variable "enable_reporting" {
   default     = false
 }
 
+# DEPRECATED: Individual API feature variables (use 'api' variable instead)
+# These are kept for backward compatibility and will be removed in a future version
+variable "enable_api" {
+  description = "DEPRECATED: Use api.enabled instead. Enable GraphQL API for programmatic access and notifications"
+  type        = bool
+  default     = null
+}
+
+variable "agent_analytics" {
+  description = "DEPRECATED: Use api.agent_analytics instead. Configuration for agent analytics functionality"
+  type = object({
+    enabled  = optional(bool, false)
+    model_id = optional(string, "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+  })
+  default = null
+}
+
+variable "discovery" {
+  description = "DEPRECATED: Use api.discovery instead. Configuration for document discovery functionality"
+  type = object({
+    enabled = optional(bool, false)
+  })
+  default = null
+}
+
+variable "chat_with_document" {
+  description = "DEPRECATED: Use api.chat_with_document instead. Configuration for chat with document functionality"
+  type = object({
+    enabled                  = optional(bool, false)
+    guardrail_id_and_version = optional(string, null)
+  })
+  default = null
+}
+
+variable "process_changes" {
+  description = "DEPRECATED: Use api.process_changes instead. Configuration for document editing and reprocessing functionality"
+  type = object({
+    enabled = optional(bool, false)
+  })
+  default = null
+}
+
 # Configuration File Path
 variable "config_file_path" {
   description = "Path to the configuration YAML file for document processing"
@@ -117,23 +213,23 @@ variable "config_file_path" {
   default     = "../../sources/config_library/pattern-1/lending-package-sample/config.yaml"
 }
 
-# Knowledge Base Configuration
+# DEPRECATED: Knowledge Base variables (use 'api.knowledge_base' instead)
 variable "enable_knowledge_base" {
-  description = "Enable AWS Bedrock Knowledge Base for document querying"
+  description = "DEPRECATED: Use api.knowledge_base.enabled instead. Enable AWS Bedrock Knowledge Base for document querying"
   type        = bool
-  default     = true
+  default     = null
 }
 
 variable "knowledge_base_model_id" {
-  description = "Model ID for knowledge base queries"
+  description = "DEPRECATED: Use api.knowledge_base.model_id instead. Model ID for knowledge base queries"
   type        = string
-  default     = "us.amazon.nova-pro-v1:0"
+  default     = null
 }
 
 variable "knowledge_base_embeddings_model_id" {
-  description = "Model ID for knowledge base embeddings"
+  description = "DEPRECATED: Use api.knowledge_base.embedding_model_id instead. Model ID for knowledge base embeddings"
   type        = string
-  default     = "amazon.titan-embed-text-v2:0"
+  default     = null
 }
 
 variable "tags" {

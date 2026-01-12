@@ -232,7 +232,7 @@ The evaluation module produces richly formatted Markdown reports with:
 
 2. **Performance Tables**:
    - Metrics tables with value ratings
-   - First-column status indicators (PASS/FAIL) for immediate identification of matches
+   - First-column status indicators (✅/❌) for immediate identification of matches
    - Detailed attribution of evaluation methods used for each field, including:
      - Method types (EXACT, FUZZY, HUNGARIAN, etc.)
      - Thresholds for fuzzy and semantic matching methods
@@ -246,7 +246,6 @@ The evaluation module produces richly formatted Markdown reports with:
    - Indications for attributes that were discovered in the data but not in the configuration
 
 Examples of method display in reports:
-
 - `EXACT` - Simple exact matching
 - `FUZZY (threshold: 0.8)` - Fuzzy matching with threshold
 - `HUNGARIAN (comparator: EXACT)` - Hungarian algorithm with exact matching
@@ -284,7 +283,6 @@ expected_results = {
 ```
 
 This capability is particularly useful for:
-
 - Exploratory evaluation when the complete schema is not yet defined
 - Handling variations in extraction outputs that may contain additional information
 - Identifying potential new attributes to add to the configuration
@@ -301,7 +299,6 @@ The evaluation service automatically integrates with the assessment feature to d
 ### Enhanced Report Format
 
 #### JSON Output with Confidence
-
 ```json
 {
   "attributes": [
@@ -319,12 +316,11 @@ The evaluation service automatically integrates with the assessment feature to d
 ```
 
 #### Markdown Table with Confidence
-
 ```
 | Status | Attribute | Expected | Actual | Confidence | Score | Method | Reason |
 | :----: | --------- | -------- | ------ | :---------------: | ----- | ------ | ------ |
-| PASS | invoice_number | INV-2024-001 | INV-2024-001 | 0.92 | 1.00 | EXACT | Exact match |
-| FAIL | vendor_name | ABC Corp | XYZ Inc | 0.75 | 0.00 | EXACT | Values do not match |
+| ✅ | invoice_number | INV-2024-001 | INV-2024-001 | 0.92 | 1.00 | EXACT | Exact match |
+| ❌ | vendor_name | ABC Corp | XYZ Inc | 0.75 | 0.00 | EXACT | Values do not match |
 ```
 
 ### Quality Analysis Benefits
@@ -338,7 +334,6 @@ Confidence scores provide additional insights for evaluation analysis:
 ### Backward Compatibility
 
 The confidence integration is fully backward compatible:
-
 - Reports without assessment data show "N/A" for confidence columns
 - Evaluation logic remains unchanged when confidence data is absent
 - Existing evaluation workflows continue to work without modification
@@ -350,7 +345,6 @@ The evaluation service fully supports nested document structures including group
 ### Attribute Types and Processing
 
 #### Simple Attributes
-
 Basic single-value extractions that are evaluated directly:
 
 ```python
@@ -366,7 +360,6 @@ Basic single-value extractions that are evaluated directly:
 ```
 
 #### Group Attributes  
-
 Nested object structures where each sub-attribute is evaluated individually:
 
 ```python
@@ -394,7 +387,6 @@ Nested object structures where each sub-attribute is evaluated individually:
 ```
 
 #### List Attributes
-
 Arrays of items where each item's attributes are evaluated individually:
 
 ```python
@@ -430,7 +422,6 @@ Arrays of items where each item's attributes are evaluated individually:
 The evaluation service automatically flattens nested extraction results for comparison:
 
 #### Input Data (Nested)
-
 ```json
 {
   "Account Number": "1234567890",
@@ -456,7 +447,6 @@ The evaluation service automatically flattens nested extraction results for comp
 ```
 
 #### Flattened Data (For Evaluation)
-
 ```json
 {
   "Account Number": "1234567890",
@@ -478,7 +468,6 @@ The evaluation service automatically flattens nested extraction results for comp
 The evaluation service provides detailed results for all flattened attributes:
 
 #### Sample Evaluation Output
-
 ```json
 {
   "attributes": [
@@ -525,17 +514,16 @@ The evaluation service provides detailed results for all flattened attributes:
 ```
 
 #### Markdown Report for Nested Structures
-
 ```markdown
 | Status | Attribute | Expected | Actual | Confidence | Score | Method | Reason |
 | :----: | --------- | -------- | ------ | :--------: | ----- | ------ | ------ |
-| PASS | Account Number | 1234567890 | 1234567890 | 0.95 | 1.00 | EXACT | Exact match |
-| PASS | Account Holder Address.Street Number | 123 | 123 | 0.95 | 1.00 | FUZZY (threshold: 0.9) | Exact match |
-| PASS | Account Holder Address.City | Seattle | Seattle | 0.88 | 1.00 | FUZZY (threshold: 0.9) | Exact match |
-| FAIL | Account Holder Address.State | WA | Washington | 0.82 | 0.00 | EXACT | Values do not match exactly |
-| PASS | Transactions[0].Date | 01/15/2024 | 01/15/2024 | 0.94 | 1.00 | FUZZY (threshold: 0.9) | Exact match |
-| PASS | Transactions[0].Amount | -4.50 | -4.50 | 0.92 | 1.00 | NUMERIC_EXACT | Exact numeric match |
-| PASS | Transactions[1].Description | ATM Withdrawal | ATM Cash | 0.87 | 0.85 | SEMANTIC (threshold: 0.7) | Semantically similar |
+| ✅ | Account Number | 1234567890 | 1234567890 | 0.95 | 1.00 | EXACT | Exact match |
+| ✅ | Account Holder Address.Street Number | 123 | 123 | 0.95 | 1.00 | FUZZY (threshold: 0.9) | Exact match |
+| ✅ | Account Holder Address.City | Seattle | Seattle | 0.88 | 1.00 | FUZZY (threshold: 0.9) | Exact match |
+| ❌ | Account Holder Address.State | WA | Washington | 0.82 | 0.00 | EXACT | Values do not match exactly |
+| ✅ | Transactions[0].Date | 01/15/2024 | 01/15/2024 | 0.94 | 1.00 | FUZZY (threshold: 0.9) | Exact match |
+| ✅ | Transactions[0].Amount | -4.50 | -4.50 | 0.92 | 1.00 | NUMERIC_EXACT | Exact numeric match |
+| ✅ | Transactions[1].Description | ATM Withdrawal | ATM Cash | 0.87 | 0.85 | SEMANTIC (threshold: 0.7) | Semantically similar |
 ```
 
 ### Benefits of Nested Structure Support

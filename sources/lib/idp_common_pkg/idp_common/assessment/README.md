@@ -13,6 +13,8 @@ The Assessment service is designed to assess the confidence and accuracy of extr
 
 - **LLM-powered confidence assessment** using Amazon Bedrock models
 - **Multi-modal analysis** with support for both document text and images
+- **Automatic bounding box processing** with spatial localization of extracted fields
+- **UI-compatible geometry output** for immediate visualization
 - **Optimized token usage** with pre-generated text confidence data (80-90% reduction)
 - **Structured confidence output** with scores and explanations per attribute
 - **Prompt template support** with placeholder substitution
@@ -20,6 +22,7 @@ The Assessment service is designed to assess the confidence and accuracy of extr
 - **Fallback mechanisms** for robust error handling
 - **Metering integration** for usage tracking
 - **Direct Document model integration**
+- **Both regular and granular assessment support** with identical bounding box capabilities
 
 ## Usage Example
 
@@ -63,6 +66,7 @@ The assessment service uses configuration-driven prompts and model parameters:
 
 ```yaml
 assessment:
+  enabled: true                         # Enable/disable assessment processing
   model: "us.amazon.nova-pro-v1:0"
   temperature: 0
   top_k: 5
@@ -87,23 +91,44 @@ assessment:
     Respond with confidence assessments in JSON format.
 ```
 
+### `enabled` Configuration Property
+
+The assessment service supports runtime enable/disable control via the `enabled` property:
+
+- **`enabled: true`** (default): Assessment processing proceeds normally
+- **`enabled: false`**: Assessment is skipped entirely with minimal overhead
+
+**Cost Optimization**: When `enabled: false`, no LLM API calls are made, resulting in zero assessment costs.
+
+**Example - Disabling Assessment:**
+```yaml
+assessment:
+  enabled: false  # Disables all assessment processing
+  # Other properties can remain but will be ignored
+  model: us.amazon.nova-lite-v1:0
+  temperature: 0.0
+```
+
+**Behavior When Disabled:**
+- Service immediately returns with logging: "Assessment is disabled via configuration"
+- No LLM API calls or S3 operations are performed
+- Document processing continues to completion
+- Minimal performance impact (early return)
+
 ## Prompt Template Placeholders
 
 The assessment service supports the following placeholders in prompt templates:
 
 ### Standard Placeholders
-
 - `{DOCUMENT_TEXT}` - Parsed document text (markdown format)
 - `{DOCUMENT_CLASS}` - Document classification (e.g., "invoice", "contract")
 - `{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}` - Formatted list of attributes to extract
 - `{EXTRACTION_RESULTS}` - JSON of extraction results to assess
 
 ### OCR Confidence Data
-
 - `{OCR_TEXT_CONFIDENCE}` - **NEW** - Optimized text confidence data with 80-90% token reduction
 
 ### Image Positioning
-
 - `{DOCUMENT_IMAGE}` - Placeholder for precise image positioning in multimodal prompts
 
 ## Text Confidence Data Integration
@@ -111,12 +136,10 @@ The assessment service supports the following placeholders in prompt templates:
 The assessment service automatically uses pre-generated text confidence data when available, providing significant performance and cost benefits:
 
 ### Automatic Data Source Selection
-
 1. **Primary**: Uses pre-generated `textConfidence.json` files from OCR processing
 2. **Fallback**: Generates text confidence data on-demand from raw OCR for backward compatibility
 
 ### Token Usage Optimization
-
 ```python
 # Traditional approach (high token usage)
 prompt = f"OCR Data: {raw_textract_response}"  # ~50,000 tokens
@@ -126,7 +149,6 @@ prompt = f"Text Confidence Data: {text_confidence_data}"  # ~5,000 tokens
 ```
 
 ### Data Format
-
 The text confidence data provides essential information in a minimal format:
 
 ```json
@@ -145,12 +167,126 @@ The text confidence data provides essential information in a minimal format:
 }
 ```
 
+## Automatic Bounding Box Processing
+
+The assessment service now includes **automatic spatial localization** capabilities that convert LLM-provided bounding box coordinates to UI-compatible geometry format without any configuration.
+
+### How It Works
+
+1. **Enhanced Prompts**: Prompt templates request both confidence scores and spatial coordinates
+2. **Automatic Detection**: Service detects when LLM provides `bbox` and `page` data
+3. **Coordinate Conversion**: Converts from 0-1000 normalized scale to 0-1 geometry format
+4. **UI Integration**: Outputs geometry format compatible with existing visualization
+
+### Example Assessment with Spatial Data
+
+**LLM Response (with bbox data):**
+```json
+{
+  "InvoiceNumber": {
+    "confidence": 0.95,
+    "confidence_reason": "Clear text with high OCR confidence",
+    "bbox": [100, 200, 300, 250],
+    "page": 1
+  },
+  "VendorAddress": {
+    "State": {
+      "confidence": 0.99,
+      "confidence_reason": "State clearly visible",
+      "bbox": [230, 116, 259, 126], 
+      "page": 1
+    }
+  }
+}
+```
+
+**Automatic Conversion Output:**
+```json
+{
+  "InvoiceNumber": {
+    "confidence": 0.95,
+    "confidence_reason": "Clear text with high OCR confidence",
+    "confidence_threshold": 0.9,
+    "geometry": [{
+      "boundingBox": {
+        "top": 0.2,
+        "left": 0.1,
+        "width": 0.2,
+        "height": 0.05
+      },
+      "page": 1
+    }]
+  },
+  "VendorAddress": {
+    "State": {
+      "confidence": 0.99,
+      "confidence_reason": "State clearly visible",
+      "confidence_threshold": 0.9,
+      "geometry": [{
+        "boundingBox": {
+          "top": 0.116,
+          "left": 0.23,
+          "width": 0.029,
+          "height": 0.01
+        },
+        "page": 1
+      }]
+    }
+  }
+}
+```
+
+### Supported Attribute Types
+
+**All attribute types support automatic bounding box processing:**
+
+- ✅ **Simple Attributes**: Direct conversion of bbox → geometry
+- ✅ **Group Attributes**: Recursive processing of nested bbox data
+- ✅ **List Attributes**: Individual bbox conversion for each list item
+
+### Enhanced Prompt Requirements
+
+To enable spatial localization, include these instructions in your `task_prompt`:
+
+```yaml
+assessment:
+  task_prompt: |
+    <spatial-localization-guidelines>
+    For each field, provide bounding box coordinates:
+    - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale
+    - page: Page number where the field appears (starting from 1)
+    
+    Coordinate system:
+    - Use normalized scale 0-1000 for both x and y axes
+    - x1, y1 = top-left corner of bounding box
+    - x2, y2 = bottom-right corner of bounding box
+    - Ensure x2 > x1 and y2 > y1
+    - Make bounding boxes tight around the actual text content
+    </spatial-localization-guidelines>
+    
+    For each attribute, provide:
+    {
+      "attribute_name": {
+        "confidence": 0.95,
+        "confidence_reason": "Clear explanation",
+        "bbox": [100, 200, 300, 250],
+        "page": 1
+      }
+    }
+```
+
+### Benefits
+
+- **No Configuration Required**: Works automatically when LLM provides bbox data
+- **Backward Compatible**: Existing assessments without bbox continue working
+- **UI Ready**: Geometry format works immediately with existing visualizations
+- **All Services Supported**: Both regular and granular assessment include this capability
+
 ## Multimodal Assessment
 
 The service supports sophisticated multimodal prompts with precise image positioning:
 
 ### Image Placeholder Usage
-
 ```python
 task_prompt = """
 Analyze the extraction results for accuracy.
@@ -168,7 +304,6 @@ assess each extracted field:
 ```
 
 ### Automatic Image Handling
-
 - Supports both single and multiple document images
 - Automatically limits to 20 images per Bedrock constraints
 - Graceful fallback when images are unavailable
@@ -182,7 +317,6 @@ The assessment service supports three distinct attribute types, each requiring a
 For basic single-value extractions like dates, amounts, or names.
 
 **Configuration Example:**
-
 ```yaml
 attributes:
   - name: "InvoiceNumber"
@@ -194,7 +328,6 @@ attributes:
 ```
 
 **Expected Assessment Response:**
-
 ```json
 {
   "InvoiceNumber": {
@@ -213,7 +346,6 @@ attributes:
 For nested object structures with multiple related fields that are logically grouped together.
 
 **Configuration Example:**
-
 ```yaml
 attributes:
   - name: "VendorDetails"
@@ -229,7 +361,6 @@ attributes:
 ```
 
 **Expected Assessment Response:**
-
 ```json
 {
   "VendorDetails": {
@@ -254,7 +385,6 @@ attributes:
 For arrays of items where each item has the same structure, such as line items, transactions, or entries.
 
 **Configuration Example:**
-
 ```yaml
 attributes:
   - name: "LineItems"
@@ -274,7 +404,6 @@ attributes:
 ```
 
 **Expected Assessment Response:**
-
 ```json
 {
   "LineItems": [
@@ -323,19 +452,16 @@ attributes:
 The assessment service automatically handles each attribute type differently:
 
 **Simple Attributes:**
-
 - Expects a single confidence assessment object
 - Adds confidence threshold to the assessment data
 - Creates alerts for low confidence scores
 
 **Group Attributes:**
-
 - Processes each sub-attribute within the group independently
 - Applies confidence thresholds to each sub-attribute
 - Creates individual alerts for each sub-attribute that falls below threshold
 
 **List Attributes:**
-
 - Processes each array item separately (individual assessment per list item)
 - Applies the same confidence thresholds to all items in the list
 - Creates alerts using array notation (e.g., "LineItems[0].Description", "LineItems[1].Total")
@@ -353,7 +479,7 @@ The assessment service automatically handles each attribute type differently:
 **Common Mistakes to Avoid:**
 
 ```json
-// WRONG: Aggregate assessment for list
+// ❌ WRONG: Aggregate assessment for list
 {
   "LineItems": {
     "confidence": 0.85,
@@ -361,7 +487,7 @@ The assessment service automatically handles each attribute type differently:
   }
 }
 
-// CORRECT: Individual item assessments
+// ✅ CORRECT: Individual item assessments
 {
   "LineItems": [
     {
@@ -488,19 +614,16 @@ Here's a comprehensive example showing all three attribute types in a single ass
 The assessment service includes comprehensive error handling:
 
 ### Parsing Failures
-
 - Automatic fallback to default confidence scores (0.5) when LLM response parsing fails
 - Detailed error logging for troubleshooting
 - Continued processing of other sections
 
 ### Data Source Fallbacks
-
 - Primary: Pre-generated text confidence files
 - Secondary: On-demand text confidence generation from raw OCR
 - Tertiary: Graceful degradation without OCR confidence data
 
 ### Template Validation
-
 - Validates required placeholders in prompt templates
 - Fallback to default prompts when template validation fails
 - Flexible placeholder enforcement for partial templates
@@ -535,19 +658,16 @@ def lambda_handler(event, context):
 ## Best Practices
 
 ### Prompt Design
-
 - Use `{OCR_TEXT_CONFIDENCE}` instead of raw OCR data for optimal token usage
 - Position `{DOCUMENT_IMAGE}` strategically in multimodal prompts
 - Include clear instructions for confidence scoring (0.0 to 1.0 scale)
 
 ### Configuration
-
 - Set appropriate temperature (0 for deterministic assessment)
 - Configure max_tokens based on expected response length
 - Use system prompts to establish assessment criteria
 
 ### Performance
-
 - Leverage pre-generated text confidence data for best performance
 - Monitor assessment timing and token usage through metering data
 - Consider image limits for large multi-page documents

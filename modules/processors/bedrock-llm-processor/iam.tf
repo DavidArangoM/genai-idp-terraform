@@ -41,7 +41,9 @@ resource "aws_iam_role_policy" "state_machine" {
           aws_lambda_function.extraction.arn,
           aws_lambda_function.process_results.arn,
           var.is_summarization_enabled ? aws_lambda_function.summarization[0].arn : "",
-          var.enable_assessment ? aws_lambda_function.assessment[0].arn : ""
+          aws_lambda_function.assessment.arn,
+          var.enable_hitl ? aws_lambda_function.hitl_wait[0].arn : "",
+          var.enable_hitl ? aws_lambda_function.hitl_status_update[0].arn : ""
         ])
       },
       {
@@ -631,10 +633,8 @@ resource "aws_iam_role_policy_attachment" "summarization_kms_attachment" {
   policy_arn = aws_iam_policy.kms_policy.arn
 }
 
-# Assessment Lambda IAM Role (conditional)
+# Assessment Lambda IAM Role (always deployed, controlled by configuration)
 resource "aws_iam_role" "assessment_lambda" {
-  count = var.enable_assessment ? 1 : 0
-
   name = "${local.name_prefix}-assessment-lambda-role"
 
   assume_role_policy = jsonencode({
@@ -654,10 +654,8 @@ resource "aws_iam_role" "assessment_lambda" {
 }
 
 resource "aws_iam_role_policy" "assessment_lambda" {
-  count = var.enable_assessment ? 1 : 0
-
   name = "${local.name_prefix}-assessment-lambda-policy"
-  role = aws_iam_role.assessment_lambda[0].id
+  role = aws_iam_role.assessment_lambda.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -671,8 +669,8 @@ resource "aws_iam_role_policy" "assessment_lambda" {
             "logs:PutLogEvents"
           ]
           Resource = [
-            "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${aws_lambda_function.assessment[0].function_name}",
-            "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${aws_lambda_function.assessment[0].function_name}:*"
+            "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${aws_lambda_function.assessment.function_name}",
+            "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${aws_lambda_function.assessment.function_name}:*"
           ]
         },
         {
@@ -775,10 +773,10 @@ resource "aws_iam_role_policy" "assessment_lambda" {
 
 # Add AppSync permissions if API is provided
 resource "aws_iam_role_policy" "assessment_lambda_appsync" {
-  count = var.enable_assessment && var.enable_api ? 1 : 0
+  count = var.enable_api ? 1 : 0
 
   name = "${local.name_prefix}-assessment-lambda-appsync-policy"
-  role = aws_iam_role.assessment_lambda[0].id
+  role = aws_iam_role.assessment_lambda.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -796,10 +794,8 @@ resource "aws_iam_role_policy" "assessment_lambda_appsync" {
 
 # Add KMS permissions if encryption key is provided
 resource "aws_iam_role_policy" "assessment_lambda_kms" {
-  count = var.enable_assessment ? 1 : 0
-
   name = "${local.name_prefix}-assessment-lambda-kms-policy"
-  role = aws_iam_role.assessment_lambda[0].id
+  role = aws_iam_role.assessment_lambda.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -819,15 +815,14 @@ resource "aws_iam_role_policy" "assessment_lambda_kms" {
 
 # Add VPC permissions if VPC config is provided
 resource "aws_iam_role_policy_attachment" "assessment_lambda_vpc" {
-  count = var.enable_assessment && length(local.vpc_subnet_ids) > 0 ? 1 : 0
+  count = length(local.vpc_subnet_ids) > 0 ? 1 : 0
 
-  role       = aws_iam_role.assessment_lambda[0].name
+  role       = aws_iam_role.assessment_lambda.name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
 resource "aws_iam_role_policy_attachment" "assessment_kms_attachment" {
-  count      = var.enable_assessment ? 1 : 0
-  role       = aws_iam_role.assessment_lambda[0].name
+  role       = aws_iam_role.assessment_lambda.name
   policy_arn = aws_iam_policy.kms_policy.arn
 }
 
@@ -860,4 +855,206 @@ resource "aws_iam_role_policy_attachment" "summarization_lambda_vpc" {
   count      = var.is_summarization_enabled && length(var.vpc_subnet_ids) > 0 ? 1 : 0
   role       = aws_iam_role.summarization_lambda[0].name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+# HITL Wait Lambda IAM Role (conditional)
+resource "aws_iam_role" "hitl_wait_lambda" {
+  count = var.enable_hitl ? 1 : 0
+  name  = "${local.name_prefix}-hitl-wait-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "hitl_wait_lambda" {
+  count = var.enable_hitl ? 1 : 0
+  name  = "${local.name_prefix}-hitl-wait-lambda-policy"
+  role  = aws_iam_role.hitl_wait_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          local.tracking_table_arn,
+          "${local.tracking_table_arn}/index/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = [
+          "${local.working_bucket_arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Add AppSync permissions if API is provided
+resource "aws_iam_role_policy" "hitl_wait_lambda_appsync" {
+  count = var.enable_hitl && var.enable_api ? 1 : 0
+  name  = "${local.name_prefix}-hitl-wait-lambda-appsync-policy"
+  role  = aws_iam_role.hitl_wait_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "appsync:GraphQL"
+        ]
+        Resource = [
+          "${local.api_arn}/types/Mutation/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Add KMS permissions if encryption key is provided
+resource "aws_iam_role_policy" "hitl_wait_lambda_kms" {
+  count = var.enable_hitl ? 1 : 0
+  name  = "${local.name_prefix}-hitl-wait-lambda-kms-policy"
+  role  = aws_iam_role.hitl_wait_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = local.encryption_key_arn
+      }
+    ]
+  })
+}
+
+# Add VPC permissions if VPC config is provided
+resource "aws_iam_role_policy_attachment" "hitl_wait_lambda_vpc" {
+  count      = var.enable_hitl && length(local.vpc_subnet_ids) > 0 ? 1 : 0
+  role       = aws_iam_role.hitl_wait_lambda[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "hitl_wait_kms_attachment" {
+  count      = var.enable_hitl ? 1 : 0
+  role       = aws_iam_role.hitl_wait_lambda[0].name
+  policy_arn = aws_iam_policy.kms_policy.arn
+}
+
+# HITL Status Update Lambda IAM Role (conditional)
+resource "aws_iam_role" "hitl_status_update_lambda" {
+  count = var.enable_hitl ? 1 : 0
+  name  = "${local.name_prefix}-hitl-status-update-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "hitl_status_update_lambda" {
+  count = var.enable_hitl ? 1 : 0
+  name  = "${local.name_prefix}-hitl-status-update-lambda-policy"
+  role  = aws_iam_role.hitl_status_update_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = [
+          "${local.working_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Add KMS permissions if encryption key is provided
+resource "aws_iam_role_policy" "hitl_status_update_lambda_kms" {
+  count = var.enable_hitl ? 1 : 0
+  name  = "${local.name_prefix}-hitl-status-update-lambda-kms-policy"
+  role  = aws_iam_role.hitl_status_update_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = local.encryption_key_arn
+      }
+    ]
+  })
+}
+
+# Add VPC permissions if VPC config is provided
+resource "aws_iam_role_policy_attachment" "hitl_status_update_lambda_vpc" {
+  count      = var.enable_hitl && length(local.vpc_subnet_ids) > 0 ? 1 : 0
+  role       = aws_iam_role.hitl_status_update_lambda[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "hitl_status_update_kms_attachment" {
+  count      = var.enable_hitl ? 1 : 0
+  role       = aws_iam_role.hitl_status_update_lambda[0].name
+  policy_arn = aws_iam_policy.kms_policy.arn
 }

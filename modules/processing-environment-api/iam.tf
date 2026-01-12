@@ -57,6 +57,24 @@ resource "aws_iam_policy" "appsync_dynamodb_policy" {
           ])
         }
       ] : [],
+      # Agent Analytics DynamoDB permissions (conditional)
+      var.agent_analytics.enabled ? [
+        {
+          Action = [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:Query",
+            "dynamodb:Scan"
+          ]
+          Effect = "Allow"
+          Resource = [
+            module.agent_analytics[0].agent_table_arn,
+            "${module.agent_analytics[0].agent_table_arn}/index/*"
+          ]
+        }
+      ] : [],
       # KMS permissions - always included
       [
         {
@@ -118,11 +136,19 @@ resource "aws_iam_policy" "appsync_lambda_policy" {
             aws_lambda_function.reprocess_document_resolver.arn,
             aws_lambda_function.get_file_contents_resolver.arn,
             aws_lambda_function.configuration_resolver.arn,
-            aws_lambda_function.get_stepfunction_execution_resolver.arn,
-            aws_lambda_function.publish_stepfunction_update_resolver.arn
+            aws_lambda_function.get_stepfunction_execution_resolver.arn
           ],
           local.knowledge_base_id != null ? [aws_lambda_function.query_knowledge_base_resolver["enabled"].arn] : [],
-          local.evaluation_baseline_bucket_arn != null ? [aws_lambda_function.copy_to_baseline_resolver["enabled"].arn] : []
+          local.evaluation_baseline_bucket_arn != null ? [aws_lambda_function.copy_to_baseline_resolver["enabled"].arn] : [],
+          var.agent_analytics.enabled ? [
+            module.agent_analytics[0].agent_request_handler_function_arn,
+            module.agent_analytics[0].list_available_agents_function_arn
+          ] : [],
+          var.chat_with_document.enabled ? [module.chat_with_document[0].chat_with_document_resolver_function_arn] : [],
+          var.discovery.enabled ? [
+            module.discovery[0].discovery_upload_resolver_function_arn,
+            module.discovery[0].discovery_processor_function_arn
+          ] : []
         )
       }
     ]
@@ -835,95 +861,6 @@ resource "aws_iam_role_policy_attachment" "get_stepfunction_execution_resolver_v
   policy_arn = aws_iam_policy.get_stepfunction_execution_resolver_vpc_policy[0].arn
 }
 
-# IAM resources from lambda_publish_stepfunction_update_resolver.tf
-resource "aws_iam_role" "publish_stepfunction_update_resolver_role" {
-  name = "PublishStepFunctionUpdateResolverRole-${random_string.suffix.result}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = var.tags
-}
-resource "aws_iam_policy" "publish_stepfunction_update_resolver_logs_policy" {
-  name        = "PublishStepFunctionUpdateResolverLogsPolicy-${random_string.suffix.result}"
-  description = "Policy for Publish Step Function Update Resolver Lambda to write logs to CloudWatch"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Effect   = "Allow"
-        Resource = "arn:${data.aws_partition.current.partition}:logs:*:*:*"
-      }
-    ]
-  })
-}
-resource "aws_iam_policy" "publish_stepfunction_update_resolver_vpc_policy" {
-  #checkov:skip=CKV_AWS_355:EC2 network interface operations require wildcard resource as ENIs are created dynamically by Lambda in VPC
-  #checkov:skip=CKV_AWS_290:EC2 network interface operations require wildcard resource as ENIs are created dynamically by Lambda in VPC
-  count       = var.vpc_config != null ? 1 : 0
-  name        = "PublishStepFunctionUpdateResolverVPCPolicy-${random_string.suffix.result}"
-  description = "Policy for Publish Step Function Update Resolver Lambda to access VPC"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "ec2:CreateNetworkInterface",
-          "ec2:DescribeNetworkInterfaces",
-          "ec2:DeleteNetworkInterface"
-        ]
-        Effect   = "Allow"
-        Resource = "*"
-      }
-    ]
-  })
-}
-resource "aws_iam_policy" "appsync_invoke_publish_stepfunction_update_resolver_policy" {
-  name        = "AppSyncInvokePublishStepFunctionUpdateResolverPolicy-${random_string.suffix.result}"
-  description = "Policy for AppSync to invoke the Publish Step Function Update Resolver Lambda"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action   = "lambda:InvokeFunction"
-        Effect   = "Allow"
-        Resource = aws_lambda_function.publish_stepfunction_update_resolver.arn
-      }
-    ]
-  })
-}
-resource "aws_iam_role_policy_attachment" "appsync_invoke_publish_stepfunction_update_resolver_attachment" {
-  role       = aws_iam_role.appsync_lambda_role.name
-  policy_arn = aws_iam_policy.appsync_invoke_publish_stepfunction_update_resolver_policy.arn
-}
-resource "aws_iam_role_policy_attachment" "publish_stepfunction_update_resolver_logs_attachment" {
-  role       = aws_iam_role.publish_stepfunction_update_resolver_role.name
-  policy_arn = aws_iam_policy.publish_stepfunction_update_resolver_logs_policy.arn
-}
-resource "aws_iam_role_policy_attachment" "publish_stepfunction_update_resolver_vpc_attachment" {
-  count      = var.vpc_config != null ? 1 : 0
-  role       = aws_iam_role.publish_stepfunction_update_resolver_role.name
-  policy_arn = aws_iam_policy.publish_stepfunction_update_resolver_vpc_policy[0].arn
-}
-
 # IAM resources from lambda_query_knowledge_base_resolver.tf
 resource "aws_iam_role" "query_knowledge_base_resolver_role" {
   for_each = var.knowledge_base.enabled ? toset(["enabled"]) : toset([])
@@ -1003,7 +940,7 @@ resource "aws_iam_policy" "query_knowledge_base_resolver_bedrock_policy" {
         ]
         Effect = "Allow"
         Resource = [
-          "arn:aws:bedrock:${data.aws_region.current.id}::foundation-model/${var.knowledge_base.model_id}"
+          "arn:${data.aws_partition.current.partition}:bedrock:${data.aws_region.current.id}::foundation-model/${var.knowledge_base.model_id}"
         ]
       }] : []
     )
@@ -1318,4 +1255,6 @@ resource "aws_iam_role_policy_attachment" "upload_resolver_vpc_attachment" {
   role       = aws_iam_role.upload_resolver_role.name
   policy_arn = aws_iam_policy.upload_resolver_vpc_policy[0].arn
 }
+
+
 

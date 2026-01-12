@@ -188,31 +188,26 @@ Each few-shot example includes:
 The `imagePath` field now supports multiple formats for maximum flexibility:
 
 **Single Image File (Original functionality)**:
-
 ```yaml
 imagePath: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
 ```
 
 **Local Directory with Multiple Images (New)**:
-
 ```yaml
 imagePath: "config_library/pattern-2/few_shot_example/example-images/"
 ```
 
 **S3 Prefix with Multiple Images (New)**:
-
 ```yaml
 imagePath: "s3://my-config-bucket/few-shot-examples/letter/"
 ```
 
 **Direct S3 Image URI**:
-
 ```yaml
 imagePath: "s3://my-config-bucket/few-shot-examples/letter/example1.jpg"
 ```
 
 When pointing to a directory or S3 prefix, the system automatically:
-
 - Discovers all image files with supported extensions (`.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp`)
 - Sorts them alphabetically by filename for consistent ordering
 - Includes each image as a separate content item in the few-shot examples
@@ -389,7 +384,6 @@ document = service.process_document_section(document, section_id)
 ```
 
 The service automatically:
-
 1. Loads few-shot examples from the configuration
 2. Filters examples to only include those from the document's classified type
 3. Includes them in extraction prompts using the `{FEW_SHOT_EXAMPLES}` placeholder
@@ -493,22 +487,22 @@ print(f"Built content with {len(content)} items")
 
 Common issues and solutions:
 
-1. **No Examples Loaded**:
+1. **No Examples Loaded**: 
    - Verify `{FEW_SHOT_EXAMPLES}` placeholder exists in task_prompt
    - Check that examples are defined for the document class being processed
    - Ensure example image paths are correct
 
-2. **Images Not Found**:
+2. **Images Not Found**: 
    - Set `ROOT_DIR` environment variable for local development
    - Set `CONFIGURATION_BUCKET` for S3 deployment
    - Verify image files exist at specified paths
 
-3. **Inconsistent Extraction Results**:
+3. **Inconsistent Extraction Results**: 
    - Review example quality and ensure they're representative
    - Check that `attributesPrompt` format matches expected output
    - Ensure examples cover the range of variations in your documents
 
-4. **Poor Performance**:
+4. **Poor Performance**: 
    - Add more diverse examples for the document class
    - Improve example quality and accuracy
    - Ensure examples demonstrate proper null handling
@@ -555,11 +549,11 @@ The extraction service is designed to be thread-safe, supporting concurrent proc
 
 ## Future Enhancements
 
-- Few-shot example support for improved accuracy and consistency
-- Class-specific example filtering for targeted extraction guidance
-- Multimodal example support with document images
-- Enhanced imagePath support for multiple images from directories and S3 prefixes
-- Dynamic few-shot example selection based on document similarity (planned)
-- Confidence scoring for extracted attributes (planned)
+- ✅ Few-shot example support for improved accuracy and consistency
+- ✅ Class-specific example filtering for targeted extraction guidance
+- ✅ Multimodal example support with document images
+- ✅ Enhanced imagePath support for multiple images from directories and S3 prefixes
+- 🔲 Dynamic few-shot example selection based on document similarity
+- 🔲 Confidence scoring for extracted attributes
 - 🔲 Support for additional extraction backends (custom models)
 - 🔲 Automatic example quality assessment and recommendations

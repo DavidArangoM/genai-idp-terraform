@@ -35,7 +35,7 @@ output "encryption_key" {
 
 output "api" {
   description = "GraphQL API details"
-  value       = var.enable_api ? module.genai_idp_accelerator.api : null
+  value       = (var.enable_api != null ? var.enable_api : var.api.enabled) ? module.genai_idp_accelerator.api : null
 }
 
 output "web_ui" {
@@ -110,6 +110,6 @@ output "training_data_bucket" {
   description = "S3 bucket containing training data and model artifacts"
   value = {
     name = module.sagemaker_model.data_bucket_name
-    arn  = "arn:aws:s3:::${module.sagemaker_model.data_bucket_name}"
+    arn  = "arn:${data.aws_partition.current.partition}:s3:::${module.sagemaker_model.data_bucket_name}"
   }
 }

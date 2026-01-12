@@ -4,6 +4,44 @@
 # Local values for the GenAI IDP Accelerator module
 
 #
+# API Configuration - Backward Compatibility Logic
+#
+locals {
+  # Merge new api variable with deprecated individual variables for backward compatibility
+  # New api variable takes precedence when both are provided
+
+  # Core API enabled flag
+  api_enabled = var.api.enabled != null ? var.api.enabled : (
+    var.enable_api != null ? var.enable_api : true
+  )
+
+  # Agent Analytics configuration
+  agent_analytics_config = var.api.agent_analytics != null ? var.api.agent_analytics : (
+    var.agent_analytics != null ? var.agent_analytics : { enabled = false }
+  )
+
+  # Discovery configuration
+  discovery_config = var.api.discovery != null ? var.api.discovery : (
+    var.discovery != null ? var.discovery : { enabled = false }
+  )
+
+  # Chat with Document configuration
+  chat_with_document_config = var.api.chat_with_document != null ? var.api.chat_with_document : (
+    var.chat_with_document != null ? var.chat_with_document : { enabled = false }
+  )
+
+  # Process Changes configuration
+  process_changes_config = var.api.process_changes != null ? var.api.process_changes : (
+    var.process_changes != null ? var.process_changes : { enabled = false }
+  )
+
+  # Knowledge Base configuration
+  knowledge_base_config = var.api.knowledge_base != null ? var.api.knowledge_base : (
+    var.knowledge_base != null ? var.knowledge_base : { enabled = false }
+  )
+}
+
+#
 # User Identity Configuration - Handle both internal and external user identity
 #
 locals {
@@ -13,7 +51,7 @@ locals {
   )
 
   # Extract user_pool_id from user_pool_arn
-  # ARN format: arn:aws:cognito-idp:region:account-id:userpool/user_pool_id
+  # ARN format: arn:{partition}:cognito-idp:region:account-id:userpool/user_pool_id
   user_pool_id = local.user_pool_arn != null ? split("/", local.user_pool_arn)[1] : null
 
   user_pool_client_id = var.user_identity != null ? var.user_identity.user_pool_client_id : (
@@ -29,7 +67,7 @@ locals {
   )
 
   # Only enable authenticated user permissions when user identity exists and API/UI is enabled
-  enable_authenticated_user_permissions = (var.enable_api || var.web_ui.enabled) && (var.user_identity != null || length(module.user_identity) > 0)
+  enable_authenticated_user_permissions = (local.api_enabled || var.web_ui.enabled) && (var.user_identity != null || length(module.user_identity) > 0)
 }
 
 #
@@ -93,15 +131,16 @@ locals {
   # IAM policy condition for authenticated user permissions - moved to user identity section above
 
   # Extract resource names from ARNs
-  input_bucket_name  = element(split(":", var.input_bucket_arn), 5)
-  output_bucket_name = element(split(":", var.output_bucket_arn), 5)
+  input_bucket_name   = element(split(":", var.input_bucket_arn), 5)
+  output_bucket_name  = element(split(":", var.output_bucket_arn), 5)
+  working_bucket_name = element(split(":", var.working_bucket_arn), 5)
 
   # Optional bucket names
   logging_bucket_name             = var.web_ui.logging_enabled ? element(split(":", var.web_ui.logging_bucket_arn), 5) : null
   evaluation_baseline_bucket_name = var.evaluation.enabled ? element(split(":", var.evaluation.baseline_bucket_arn), 5) : null
-  reporting_bucket_name           = var.reporting.enabled && var.reporting.bucket_arn != null ? try(regex("arn:aws:s3:::([^/]+)", var.reporting.bucket_arn)[0], "") : ""
+  reporting_bucket_name           = var.reporting.enabled && var.reporting.bucket_arn != null ? try(regex("arn:(aws|aws-us-gov):s3:::([^/]+)", var.reporting.bucket_arn)[1], "") : ""
   web_ui_reporting_bucket_name    = local.reporting_bucket_name
-  web_ui_evaluation_bucket_name   = var.evaluation.enabled && var.evaluation.baseline_bucket_arn != null ? try(regex("arn:aws:s3:::([^/]+)", var.evaluation.baseline_bucket_arn)[0], "") : ""
+  web_ui_evaluation_bucket_name   = var.evaluation.enabled && var.evaluation.baseline_bucket_arn != null ? try(regex("arn:(aws|aws-us-gov):s3:::([^/]+)", var.evaluation.baseline_bucket_arn)[1], "") : ""
 }
 
 #
@@ -208,7 +247,7 @@ locals {
   ] : []
 
   # Processing Environment API statements (conditional)
-  processing_environment_api_statements = var.enable_api ? [
+  processing_environment_api_statements = local.api_enabled ? [
     {
       Effect = "Allow"
       Action = [
@@ -233,7 +272,7 @@ locals {
   ] : []
 
   # API statements (conditional)
-  api_statements = var.enable_api ? [
+  api_statements = local.api_enabled ? [
     {
       Effect = "Allow"
       Action = [

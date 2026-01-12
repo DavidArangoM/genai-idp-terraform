@@ -47,7 +47,7 @@ resource "aws_kms_key" "encryption_key" {
         Sid    = "Enable IAM User Permissions"
         Effect = "Allow"
         Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+          AWS = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
         }
         Action   = "kms:*"
         Resource = "*"
@@ -68,7 +68,7 @@ resource "aws_kms_key" "encryption_key" {
         Resource = "*"
         Condition = {
           ArnEquals = {
-            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:*"
+            "kms:EncryptionContext:aws:logs:arn" = "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:*"
           }
         }
       }
@@ -382,7 +382,6 @@ module "genai_idp_accelerator" {
       enabled  = var.summarization_enabled
       model_id = var.summarization_model_id
     }
-    enable_assessment = var.enable_assessment
     config            = local.config
   }
 
@@ -414,8 +413,16 @@ module "genai_idp_accelerator" {
     database_name = aws_glue_catalog_database.reporting_database[0].name
   } : { enabled = false }
 
-  # Feature flags
-  enable_api = var.enable_api
+  # API configuration (consolidated)
+  api = var.api
+
+  # Feature flags (DEPRECATED - use api variable instead)
+  # These are kept for backward compatibility during migration
+  enable_api         = var.enable_api
+  agent_analytics    = var.agent_analytics
+  chat_with_document = var.chat_with_document
+  process_changes    = var.process_changes
+  discovery          = var.discovery
 
   # Layer configuration
   force_rebuild_layers = var.force_rebuild_layers

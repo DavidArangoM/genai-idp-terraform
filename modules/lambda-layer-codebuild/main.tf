@@ -189,7 +189,7 @@ resource "aws_codebuild_project" "lambda_layers_build" {
     location               = local.lambda_layers_bucket_name
     path                   = "layers"
     packaging              = "NONE"
-    override_artifact_name = false
+    override_artifact_name = true
   }
 
   environment {
@@ -347,7 +347,7 @@ artifacts:
   files:
     - '**/*'
   base-directory: /tmp/layers
-  discard-paths: no
+  discard-paths: yes
 EOF
   }
 }
@@ -384,6 +384,13 @@ locals {
   }
 }
 
+# Wait for S3 consistency after CodeBuild completion
+resource "time_sleep" "wait_for_s3_consistency" {
+  depends_on = [aws_lambda_invocation.trigger_codebuild]
+
+  create_duration = "120s"
+}
+
 # Create Lambda layers only for non-empty requirements
 resource "aws_lambda_layer_version" "layers" {
   for_each = local.non_empty_requirements
@@ -397,7 +404,7 @@ resource "aws_lambda_layer_version" "layers" {
   # Force layer recreation when requirements change
   source_code_hash = md5(each.value)
 
-  depends_on = [aws_lambda_invocation.trigger_codebuild]
+  depends_on = [time_sleep.wait_for_s3_consistency]
 }
 
 # Optional: Cleanup old build artifacts

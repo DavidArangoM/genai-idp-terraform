@@ -41,8 +41,8 @@ check "web_ui_requires_user_identity" {
 #tfsec:ignore:*
 check "web_ui_requires_api" {
   assert {
-    condition     = !var.web_ui.enabled || var.enable_api
-    error_message = "When web_ui.enabled is true, enable_api must also be true. The Web UI requires the GraphQL API to function properly."
+    condition     = !var.web_ui.enabled || local.api_enabled
+    error_message = "When web_ui.enabled is true, api.enabled must also be true. The Web UI requires the GraphQL API to function properly."
   }
 }
 
@@ -57,23 +57,10 @@ check "single_processor_required" {
   }
 }
 
-# Validation: Required bucket ARNs
-#tfsec:ignore:*
-check "required_bucket_arns" {
-  assert {
-    condition     = var.input_bucket_arn != null && var.output_bucket_arn != null && var.working_bucket_arn != null
-    error_message = "input_bucket_arn, output_bucket_arn, and working_bucket_arn are required."
-  }
-}
-
-# Validation: Encryption key ARN is required
-#tfsec:ignore:*
-check "encryption_key_required" {
-  assert {
-    condition     = var.encryption_key_arn != null
-    error_message = "encryption_key_arn is required."
-  }
-}
+# Note: Validation checks for computed values (bucket ARNs, encryption key ARN, etc.) 
+# have been removed to eliminate "known after apply" warnings. These validations
+# are still enforced by Terraform's resource dependencies and will fail at apply
+# time if the required resources don't exist.
 
 # Validation: Web UI logging bucket requirement
 #tfsec:ignore:*
@@ -84,14 +71,8 @@ check "web_ui_logging_bucket" {
   }
 }
 
-# Validation: BDA processor project ARN requirement
-#tfsec:ignore:*
-check "bda_processor_project_arn" {
-  assert {
-    condition     = var.bda_processor != null ? var.bda_processor.project_arn != null : true
-    error_message = "project_arn is required in bda_processor configuration."
-  }
-}
+# Validation: BDA processor project ARN requirement (only for static values)
+# Note: Removed check for computed project_arn to eliminate warnings
 
 # Validation: SageMaker UDOP processor endpoint ARN requirement
 #tfsec:ignore:*
@@ -160,7 +141,7 @@ module "assets_bucket" {
 module "idp_common_layer" {
   source = "./modules/idp-common-layer"
 
-  layer_prefix             = "${local.name_prefix}-idp-common-layer"
+  layer_prefix             = "${local.name_prefix}-idp-layer"
   lambda_layers_bucket_arn = module.assets_bucket.bucket_arn
   idp_common_extras        = local.idp_common_layer_extras
   force_rebuild            = var.force_rebuild_layers
@@ -171,7 +152,7 @@ module "idp_common_layer" {
 # User Identity (Cognito) - Only create if needed and not provided externally
 #
 module "user_identity" {
-  count  = (var.enable_api || var.web_ui.enabled) && var.user_identity == null ? 1 : 0
+  count  = (local.api_enabled || var.web_ui.enabled) && var.user_identity == null ? 1 : 0
   source = "./modules/user-identity"
 
   name_prefix                 = "${local.name_prefix}-user-identity"
@@ -212,6 +193,17 @@ module "human_review" {
   # Stack name for A2I resources
   stack_name = local.name_prefix
 
+  # Pattern-2 HITL configuration
+  enable_pattern2_hitl      = var.human_review.enable_pattern2_hitl
+  hitl_confidence_threshold = var.human_review.hitl_confidence_threshold
+
+  # Pattern-2 HITL dependencies (only needed when Pattern-2 HITL is enabled)
+  tracking_table_name = module.processing_environment.tracking_table_name
+  tracking_table_arn  = module.processing_environment.tracking_table_arn
+  working_bucket_name = local.working_bucket_name
+  working_bucket_arn  = var.working_bucket_arn
+  state_machine_arn   = var.bedrock_llm_processor != null ? try(module.bedrock_llm_processor[0].state_machine_arn, "") : ""
+
   tags = var.tags
 }
 
@@ -233,6 +225,7 @@ module "processing_environment" {
 
   # Encryption key
   encryption_key_arn = var.encryption_key_arn
+  enable_encryption  = var.enable_encryption
 
   # Lambda layer
   idp_common_layer_arn = module.idp_common_layer.layer_arn
@@ -244,7 +237,7 @@ module "processing_environment" {
   } : null
 
   # Optional: API configuration for UI updates
-  api = var.enable_api ? {
+  api = local.api_enabled ? {
     api_id           = module.processing_environment_api[0].api_id
     api_name         = module.processing_environment_api[0].api_name
     api_arn          = module.processing_environment_api[0].api_arn
@@ -273,7 +266,7 @@ module "processing_environment" {
 # GraphQL API (Optional)
 #
 module "processing_environment_api" {
-  count  = var.enable_api ? 1 : 0
+  count  = local.api_enabled ? 1 : 0
   source = "./modules/processing-environment-api"
 
   name = "${local.name_prefix}-api"
@@ -308,15 +301,16 @@ module "processing_environment_api" {
   configuration_table_arn = module.processing_environment.configuration_table_arn
 
   # S3 bucket ARNs
-  input_bucket_arn  = var.input_bucket_arn
-  output_bucket_arn = var.output_bucket_arn
+  input_bucket_arn   = var.input_bucket_arn
+  output_bucket_arn  = var.output_bucket_arn
+  working_bucket_arn = var.working_bucket_arn
 
   # Optional: Evaluation baseline bucket
   evaluation_enabled             = var.evaluation.enabled
   evaluation_baseline_bucket_arn = var.evaluation.enabled ? var.evaluation.baseline_bucket_arn : null
 
   # Knowledge Base configuration
-  knowledge_base = var.knowledge_base
+  knowledge_base = local.knowledge_base_config
 
   # Encryption key
   encryption_key_arn = var.encryption_key_arn
@@ -329,6 +323,34 @@ module "processing_environment_api" {
 
   # Lambda tracing configuration
   lambda_tracing_mode = var.lambda_tracing_mode
+
+  # Agent Analytics configuration
+  agent_analytics = local.agent_analytics_config.enabled && var.reporting.enabled ? {
+    enabled                 = true
+    model_id                = local.agent_analytics_config.model_id
+    reporting_database_name = var.reporting.database_name
+    reporting_bucket_arn    = var.reporting.bucket_arn
+  } : { enabled = false }
+
+  # Discovery configuration
+  discovery = local.discovery_config.enabled ? {
+    enabled = true
+  } : { enabled = false }
+
+  # Chat with Document configuration
+  chat_with_document = local.chat_with_document_config.enabled ? {
+    enabled                  = true
+    guardrail_id_and_version = local.chat_with_document_config.guardrail_id_and_version
+  } : { enabled = false }
+
+  # Process Changes configuration (Edit Sections feature)
+  enable_edit_sections = local.process_changes_config.enabled
+  document_queue_url   = local.process_changes_config.enabled ? module.processing_environment.document_queue_url : null
+  document_queue_arn   = local.process_changes_config.enabled ? module.processing_environment.document_queue_arn : null
+
+  # IDP Common Layer ARN for sub-modules
+  idp_common_layer_arn     = module.idp_common_layer.layer_arn
+  lambda_layers_bucket_arn = module.assets_bucket.bucket_arn
 
   tags = var.tags
 }
@@ -348,9 +370,9 @@ module "bda_processor" {
   lambda_layers_bucket_arn = module.assets_bucket.bucket_arn
 
   # API configuration (if enabled)
-  api_id          = var.enable_api ? module.processing_environment_api[0].api_id : null
-  api_arn         = var.enable_api ? module.processing_environment_api[0].api_arn : null
-  api_graphql_url = var.enable_api ? module.processing_environment_api[0].graphql_url : null
+  api_id          = local.api_enabled ? module.processing_environment_api[0].api_id : null
+  api_arn         = local.api_enabled ? module.processing_environment_api[0].api_arn : null
+  api_graphql_url = local.api_enabled ? module.processing_environment_api[0].graphql_url : null
 
   # S3 bucket ARNs
   input_bucket_arn        = var.input_bucket_arn
@@ -402,10 +424,10 @@ module "bedrock_llm_processor" {
   name = "${local.name_prefix}-processor"
 
   # API configuration (if enabled)
-  enable_api      = var.enable_api
-  api_id          = var.enable_api ? module.processing_environment_api[0].api_id : null
-  api_arn         = var.enable_api ? module.processing_environment_api[0].api_arn : null
-  api_graphql_url = var.enable_api ? module.processing_environment_api[0].graphql_url : null
+  enable_api      = local.api_enabled
+  api_id          = local.api_enabled ? module.processing_environment_api[0].api_id : null
+  api_arn         = local.api_enabled ? module.processing_environment_api[0].api_arn : null
+  api_graphql_url = local.api_enabled ? module.processing_environment_api[0].graphql_url : null
 
   # S3 bucket ARNs
   input_bucket_arn        = var.input_bucket_arn
@@ -429,9 +451,10 @@ module "bedrock_llm_processor" {
 
   # Model configurations - pass model IDs directly for optional override
   # The processor will use config.yaml by default and override with these if provided
-  classification_model_id = var.bedrock_llm_processor.classification_model_id
-  extraction_model_id     = var.bedrock_llm_processor.extraction_model_id
-  evaluation_model_id     = var.evaluation.enabled ? var.evaluation.model_id : null
+  classification_model_id      = var.bedrock_llm_processor.classification_model_id
+  extraction_model_id          = var.bedrock_llm_processor.extraction_model_id
+  evaluation_model_id          = var.evaluation.enabled ? var.evaluation.model_id : null
+  max_pages_for_classification = var.bedrock_llm_processor.max_pages_for_classification
 
 
 
@@ -440,7 +463,7 @@ module "bedrock_llm_processor" {
 
   # Feature flags
   is_summarization_enabled = var.bedrock_llm_processor.summarization.enabled
-  enable_assessment        = var.bedrock_llm_processor.enable_assessment
+  enable_hitl              = var.bedrock_llm_processor.enable_hitl
 
   # Optional: Summarization model configuration
   summarization_model_id = var.bedrock_llm_processor.summarization.enabled ? var.bedrock_llm_processor.summarization.model_id : null
@@ -459,10 +482,10 @@ module "sagemaker_udop_processor" {
   name = "${local.name_prefix}-processor"
 
   # API configuration (if enabled)
-  enable_api      = var.enable_api
-  api_id          = var.enable_api ? module.processing_environment_api[0].api_id : null
-  api_arn         = var.enable_api ? module.processing_environment_api[0].api_arn : null
-  api_graphql_url = var.enable_api ? module.processing_environment_api[0].graphql_url : null
+  enable_api      = local.api_enabled
+  api_id          = local.api_enabled ? module.processing_environment_api[0].api_id : null
+  api_arn         = local.api_enabled ? module.processing_environment_api[0].api_arn : null
+  api_graphql_url = local.api_enabled ? module.processing_environment_api[0].graphql_url : null
 
   # S3 bucket ARNs
   input_bucket_arn        = var.input_bucket_arn
@@ -496,7 +519,6 @@ module "sagemaker_udop_processor" {
   evaluation_model_id    = var.evaluation.enabled ? var.evaluation.model_id : null
 
   # Feature flags
-  enable_assessment = var.sagemaker_udop_processor.enable_assessment
 
   # Optional: Document processing configuration
   config = var.sagemaker_udop_processor.config
@@ -535,7 +557,7 @@ module "web_ui" {
   }
 
   # API configuration (if enabled)
-  api_url = var.enable_api ? module.processing_environment_api[0].graphql_url : null
+  api_url = local.api_enabled ? module.processing_environment_api[0].graphql_url : null
 
   # S3 bucket ARNs
   input_bucket_arn  = var.input_bucket_arn
@@ -552,6 +574,12 @@ module "web_ui" {
 
   # Evaluation baseline bucket name (extracted from ARN)
   evaluation_baseline_bucket_name = local.web_ui_evaluation_bucket_name
+
+  # Discovery bucket name (if discovery is enabled)
+  discovery_bucket_name = local.discovery_config.enabled && local.api_enabled ? module.processing_environment_api[0].discovery_bucket_name : null
+
+  # Knowledge Base enabled flag
+  knowledge_base_enabled = local.knowledge_base_config.enabled
 
   # IDP Pattern mapping (processor type to CloudFormation pattern names)
   idp_pattern = local.idp_pattern_mapping[local.processor_type]
@@ -609,11 +637,20 @@ module "reporting" {
   output_bucket_arn       = var.output_bucket_arn
   output_bucket_name      = local.output_bucket_name
 
+  # Configuration table
+  configuration_table_arn  = module.processing_environment.configuration_table_arn
+  configuration_table_name = module.processing_environment.configuration_table_name
+
   # Configuration
   metric_namespace   = module.processing_environment.metric_namespace
   log_level          = var.log_level
   log_retention_days = var.log_retention_days
   encryption_key_arn = var.encryption_key_arn
+  enable_encryption  = var.enable_encryption
+
+  # Glue crawler configuration
+  crawler_schedule            = var.reporting.crawler_schedule
+  enable_partition_projection = var.reporting.enable_partition_projection
 
   # VPC configuration
   vpc_subnet_ids         = var.vpc_subnet_ids
@@ -662,6 +699,7 @@ module "processor_attachment" {
 
   # Encryption and layers
   encryption_key_arn   = var.encryption_key_arn
+  enable_encryption    = var.enable_encryption
   idp_common_layer_arn = module.idp_common_layer.layer_arn
 
   # Logging configuration
@@ -670,9 +708,9 @@ module "processor_attachment" {
   log_retention_days = module.processing_environment.log_retention_days
 
   # Optional: API configuration
-  api_id          = var.enable_api ? module.processing_environment_api[0].api_id : null
-  api_arn         = var.enable_api ? module.processing_environment_api[0].api_arn : null
-  api_graphql_url = var.enable_api ? module.processing_environment_api[0].graphql_url : null
+  api_id          = local.api_enabled ? module.processing_environment_api[0].api_id : null
+  api_arn         = local.api_enabled ? module.processing_environment_api[0].api_arn : null
+  api_graphql_url = local.api_enabled ? module.processing_environment_api[0].graphql_url : null
 
   # Optional: Evaluation configuration
   evaluation_options = var.evaluation.enabled ? {

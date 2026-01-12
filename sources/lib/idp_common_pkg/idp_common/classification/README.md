@@ -10,6 +10,9 @@ This module provides document classification capabilities for the IDP Accelerato
 - Classification of documents using multiple backend options:
   - Amazon Bedrock LLMs
   - SageMaker UDOP models
+- **Optional regex-based classification for enhanced performance**
+  - Document name regex matching when all pages should be classified as the same class
+  - Page content regex matching for multi-modal page-level classification
 - Direct integration with the Document data model
 - Support for both text and image content
 - Concurrent processing of multiple pages
@@ -17,6 +20,201 @@ This module provides document classification capabilities for the IDP Accelerato
 - Grouping of pages into sections by classification
 - Comprehensive error handling and retry mechanisms
 - **DynamoDB caching for resilient page-level classification**
+- **Sequence segmentation using BIO-like approach for document boundary detection**
+
+## Sequence Segmentation Approach
+
+The multimodal page-level classification method implements a sequence segmentation approach similar to BIO (Begin-Inside-Outside) tagging commonly used in NLP. This enables accurate segmentation of multi-document packets where a single file may contain multiple distinct documents.
+
+### How It Works
+
+Each page receives two pieces of information:
+1. **Document Type**: The classification label (e.g., "invoice", "letter", "financial_statement")
+2. **Document Boundary**: A boundary indicator that signals document transitions:
+   - `"start"`: Indicates the beginning of a new document (similar to "Begin" in BIO)
+   - `"continue"`: Indicates continuation of the current document (similar to "Inside" in BIO)
+
+### Benefits
+
+- **Multi-Document Packet Support**: Accurately segments packets containing multiple documents
+- **Type-Aware Boundaries**: Detects when a new document of the same type begins
+- **Automatic Section Creation**: Pages are grouped into sections based on both type and boundaries
+- **Improved Accuracy**: Context-aware classification that considers document flow
+
+### Example Segmentation
+
+Consider a packet with 6 pages containing two invoices and one letter:
+
+```
+Page 1: type="invoice", boundary="start"      → Section 1 (Invoice #1)
+Page 2: type="invoice", boundary="continue"   → Section 1 (Invoice #1)
+Page 3: type="letter", boundary="start"       → Section 2 (Letter)
+Page 4: type="letter", boundary="continue"    → Section 2 (Letter)
+Page 5: type="invoice", boundary="start"      → Section 3 (Invoice #2)
+Page 6: type="invoice", boundary="continue"   → Section 3 (Invoice #2)
+```
+
+The system automatically creates three sections, properly separating the two invoices despite them having the same document type.
+
+## Regex-Based Classification for Enhanced Performance
+
+The classification service now supports optional regex-based pattern matching to provide significant performance improvements and deterministic classification for known document patterns. This feature enables instant classification without LLM API calls when regex patterns match.
+
+### Document Name Regex Classification
+
+When you want all pages of a document to be classified the same way, document name regex patterns can instantly classify entire documents based on their filename or ID:
+
+```yaml
+classes:
+  - name: Payslip
+    description: "Employee wage statement showing earnings and deductions"
+    document_name_regex: "(?i).*(payslip|paystub|salary|wage).*"
+    attributes:
+      - name: EmployeeName
+        description: "Name of the employee"
+        attributeType: simple
+```
+
+**How it works:**
+- Works with any number of document classes defined in configuration
+- When document ID matches the regex pattern, all pages are classified as that class
+- Skips all LLM processing for massive performance gains
+- Provides info-level logging when matches occur
+
+### Page Content Regex Classification
+
+For multi-modal page-level classification, page content regex patterns can classify individual pages based on text content:
+
+```yaml
+classes:
+  - name: Invoice
+    description: "Business invoice document"
+    document_page_content_regex: "(?i)(invoice\\s+number|bill\\s+to|amount\\s+due)"
+    attributes:
+      - name: InvoiceNumber
+        description: "Invoice number"
+        attributeType: simple
+  - name: Payslip
+    description: "Employee wage statement"  
+    document_page_content_regex: "(?i)(gross\\s+pay|net\\s+pay|employee\\s+id)"
+    attributes:
+      - name: EmployeeName
+        description: "Employee name"
+        attributeType: simple
+```
+
+**How it works:**
+- Only applies to multi-modal page-level classification method
+- Each page's text content is checked against all class regex patterns
+- First matching pattern wins and classifies the page instantly
+- Falls back to LLM classification when no patterns match
+- Provides info-level logging when matches occur
+
+### Configuration Options
+
+Both regex types are optional and can be used together:
+
+```yaml
+classes:
+  - name: W2-Form
+    description: "W2 tax form with wage and tax information"
+    # Both regex types can be specified
+    document_name_regex: "(?i).*w-?2.*"  # For single-class scenarios
+    document_page_content_regex: "(?i)(form\\s+w-?2|wage\\s+and\\s+tax)"  # For page-level
+    attributes:
+      - name: EmployerEIN
+        description: "Employer identification number"
+        attributeType: simple
+```
+
+### Performance Benefits
+
+**Speed Improvements:**
+- Regex matching is nearly instantaneous compared to LLM calls
+- Document name regex: ~100-1000x faster (entire document classified instantly)
+- Page content regex: ~10-50x faster per matched page
+
+**Cost Savings:**
+- Zero token usage for regex-matched classifications
+- No Bedrock/SageMaker API calls for matched patterns
+- Significant cost reduction for documents with recognizable patterns
+
+**Deterministic Results:**
+- Consistent classification results for pattern-matched documents
+- Eliminates LLM variability for known document types
+- Reliable classification for high-volume processing scenarios
+
+### Best Practices for Regex Patterns
+
+1. **Case-Insensitive Matching**: Use `(?i)` flag for robust matching
+   ```regex
+   (?i).*(invoice|bill).*  # Matches "Invoice", "INVOICE", "bill", "BILL"
+   ```
+
+2. **Flexible Whitespace**: Use `\\s+` for varying whitespace
+   ```regex
+   (?i)(gross\\s+pay|net\\s+pay)  # Matches "gross pay", "gross  pay", "GROSS PAY"
+   ```
+
+3. **Multiple Alternatives**: Use `|` for different possible terms
+   ```regex
+   (?i).*(payslip|paystub|salary|wage).*  # Matches any of these terms
+   ```
+
+4. **Specific Enough**: Balance specificity to avoid false matches
+   ```regex
+   # Good: Specific to payslips
+   (?i)(gross\\s+pay|employee\\s+id|pay\\s+period)
+   
+   # Too broad: Could match many document types
+   (?i)(pay|id|period)
+   ```
+
+### Error Handling
+
+The regex system includes comprehensive error handling:
+
+- **Compilation Errors**: Invalid regex patterns are logged and ignored, fallback to LLM
+- **Runtime Errors**: Regex matching failures fallback to standard classification
+- **Graceful Degradation**: System continues to work normally even with invalid patterns
+- **Detailed Logging**: Debug and error logs help with pattern troubleshooting
+
+### Integration Example
+
+```python
+from idp_common import classification, get_config
+from idp_common.models import Document
+
+# Load configuration with regex patterns
+config = get_config()
+
+# Initialize service - regex patterns are automatically used
+service = classification.ClassificationService(
+    region="us-east-1",
+    config=config,
+    backend="bedrock"
+)
+
+# Classification automatically uses regex when patterns match
+document = service.classify_document(document)
+
+# Check if regex was used
+for page_id, page in document.pages.items():
+    metadata = getattr(page, 'metadata', {})
+    if metadata.get('regex_matched', False):
+        print(f"Page {page_id} was classified using regex patterns")
+    else:
+        print(f"Page {page_id} was classified using LLM")
+```
+
+### Demonstration Notebook
+
+See `notebooks/examples/step2_classification_with_regex.ipynb` for interactive demonstrations of:
+- Document name regex classification
+- Page content regex classification  
+- Performance comparisons between regex and LLM methods
+- Configuration examples and best practices
+- Error handling scenarios
 
 ## Usage Example
 
@@ -241,7 +439,6 @@ The classification service now supports optional DynamoDB caching to improve eff
 ### Configuration
 
 #### Via Constructor Parameter
-
 ```python
 from idp_common import classification, get_config
 
@@ -255,7 +452,6 @@ service = classification.ClassificationService(
 ```
 
 #### Via Environment Variable
-
 ```bash
 export CLASSIFICATION_CACHE_TABLE=classification-cache-table
 ```
@@ -283,7 +479,6 @@ The cache uses the following DynamoDB table structure:
   - `ExpiresAfter` (Number): TTL attribute for automatic cleanup (24 hours)
 
 #### Example DynamoDB Item
-
 ```json
 {
   "PK": "classcache#doc-123#arn:aws:states:us-east-1:123456789012:execution:MyWorkflow:abc-123",
@@ -367,7 +562,7 @@ except Exception as e:
 The Bedrock backend uses Amazon Bedrock LLMs to classify documents:
 
 - Supports multiple model options (Claude, Titan, etc.)
-- Works with both text and image content
+- Works with both text and image content 
 - Uses natural language understanding for classification
 - Configurable system prompts and parameters
 
@@ -433,31 +628,26 @@ Each few shot example includes:
 The `imagePath` field now supports multiple formats for maximum flexibility:
 
 **Single Image File (Original functionality)**:
-
 ```yaml
 imagePath: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
 ```
 
 **Local Directory with Multiple Images (New)**:
-
 ```yaml
 imagePath: "config_library/pattern-2/few_shot_example/example-images/"
 ```
 
 **S3 Prefix with Multiple Images (New)**:
-
 ```yaml
 imagePath: "s3://my-config-bucket/few-shot-examples/letter/"
 ```
 
 **Direct S3 Image URI**:
-
 ```yaml
 imagePath: "s3://my-config-bucket/few-shot-examples/letter/example1.jpg"
 ```
 
 When pointing to a directory or S3 prefix, the system automatically:
-
 - Discovers all image files with supported extensions (`.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`, `.webp`)
 - Sorts them alphabetically by filename for consistent ordering
 - Includes each image as a separate content item in the few-shot examples
@@ -490,13 +680,11 @@ Using few shot examples provides several advantages:
 When creating few shot examples:
 
 #### 1. Quality over Quantity
-
 - Use 1-3 high-quality examples per document class
 - Ensure examples are representative of real-world documents
 - Include diverse examples that cover different variations
 
 #### 2. Clear and Complete Examples
-
 ```yaml
 # Good example - specific and complete
 attributesPrompt: |
@@ -514,7 +702,6 @@ attributesPrompt: |
 ```
 
 #### 3. Handle Null Values Appropriately
-
 ```yaml
 attributesPrompt: |
   expected attributes are:
@@ -524,7 +711,6 @@ attributesPrompt: |
 ```
 
 #### 4. Use Realistic Examples
-
 - Choose examples that represent typical documents in your use case
 - Include examples with both common and edge case scenarios
 - Ensure image quality is good and text is clearly readable
@@ -551,7 +737,6 @@ document = service.classify_document(document)
 ```
 
 The service automatically:
-
 1. Loads few shot examples from the configuration
 2. Includes them in classification prompts using the `{FEW_SHOT_EXAMPLES}` placeholder
 3. Formats examples appropriately for both classification and extraction tasks

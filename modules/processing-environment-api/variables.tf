@@ -266,3 +266,83 @@ variable "lambda_tracing_mode" {
     error_message = "lambda_tracing_mode must be either 'Active' or 'PassThrough'."
   }
 }
+
+variable "agent_analytics" {
+  description = "Agent analytics configuration"
+  type = object({
+    enabled                 = bool
+    model_id                = optional(string, "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+    reporting_database_name = optional(string)
+    reporting_bucket_arn    = optional(string)
+  })
+  default = { enabled = false }
+}
+
+variable "discovery" {
+  description = "Discovery workflow configuration"
+  type = object({
+    enabled = bool
+  })
+  default = { enabled = false }
+}
+
+variable "chat_with_document" {
+  description = "Chat with Document functionality configuration"
+  type = object({
+    enabled                  = bool
+    guardrail_id_and_version = optional(string, null)
+  })
+  default = { enabled = false }
+}
+
+# =============================================================================
+# EDIT SECTIONS FEATURE VARIABLES
+# =============================================================================
+
+variable "enable_edit_sections" {
+  description = "Whether to enable the Edit Sections feature for selective reprocessing"
+  type        = bool
+  default     = false
+}
+
+variable "working_bucket_arn" {
+  description = "ARN of the S3 bucket for working files (required for Edit Sections feature)"
+  type        = string
+  default     = null
+}
+
+variable "document_queue_url" {
+  description = "URL of the SQS queue for document processing (required for Edit Sections feature)"
+  type        = string
+  default     = null
+}
+
+variable "document_queue_arn" {
+  description = "ARN of the SQS queue for document processing (required for Edit Sections feature)"
+  type        = string
+  default     = null
+}
+
+variable "data_retention_in_days" {
+  description = "Data retention period in days for processed documents"
+  type        = number
+  default     = 7
+}
+
+variable "idp_common_layer_arn" {
+  description = "ARN of the IDP Common Lambda layer (required for Edit Sections feature)"
+  type        = string
+  default     = null
+}
+
+variable "enable_encryption" {
+  description = "Enable encryption for resources"
+  type        = bool
+  default     = true
+}
+
+variable "lambda_layers_bucket_arn" {
+  description = "ARN of the S3 bucket for Lambda layers"
+  type        = string
+  default     = null
+}
