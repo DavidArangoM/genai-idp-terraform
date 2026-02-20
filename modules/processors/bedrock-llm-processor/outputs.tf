@@ -77,6 +77,14 @@ output "lambda_functions" {
       name = aws_lambda_function.hitl_status_update[0].function_name
       arn  = aws_lambda_function.hitl_status_update[0].arn
     } : null
+    rule_validation = var.enable_rule_validation ? {
+      name = aws_lambda_function.rule_validation[0].function_name
+      arn  = aws_lambda_function.rule_validation[0].arn
+    } : null
+    rule_validation_orchestration = var.enable_rule_validation ? {
+      name = aws_lambda_function.rule_validation_orchestration[0].function_name
+      arn  = aws_lambda_function.rule_validation_orchestration[0].arn
+    } : null
   }
 }
 

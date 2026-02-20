@@ -208,6 +208,12 @@ variable "enable_hitl" {
   default     = false
 }
 
+variable "enable_rule_validation" {
+  description = "Whether to enable Rule Validation functionality (v0.4.13) for business rule compliance checking"
+  type        = bool
+  default     = false
+}
+
 variable "assessment_model_id" {
   description = "The Bedrock model ID to use for assessment (when assessment is enabled)"
   type        = string
