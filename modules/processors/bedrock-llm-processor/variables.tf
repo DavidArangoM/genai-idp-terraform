@@ -240,3 +240,31 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# v0.4.15 P3 Features - Lambda Hook Inference
+
+variable "enable_lambda_hook" {
+  description = "Whether to enable Lambda Hook Inference (v0.4.15) for custom LLM integration"
+  type        = bool
+  default     = false
+}
+
+variable "lambda_hook_function_arn" {
+  description = "ARN of the custom Lambda function to use as Lambda Hook (v0.4.15)"
+  type        = string
+  default     = null
+}
+
+# v0.4.15 P3 Features - Configuration Versioning
+
+variable "enable_configuration_versioning" {
+  description = "Whether to enable Configuration Versioning (v0.4.15)"
+  type        = bool
+  default     = false
+}
+
+variable "default_config_version" {
+  description = "Default configuration version name (v0.4.15)"
+  type        = string
+  default     = "default"
+}
