@@ -42,6 +42,8 @@ resource "aws_iam_role_policy" "state_machine" {
           aws_lambda_function.process_results.arn,
           var.is_summarization_enabled ? aws_lambda_function.summarization[0].arn : "",
           aws_lambda_function.assessment.arn,
+          var.enable_rule_validation ? aws_lambda_function.rule_validation[0].arn : "",
+          var.enable_rule_validation ? aws_lambda_function.rule_validation_orchestration[0].arn : "",
           var.enable_hitl ? aws_lambda_function.hitl_wait[0].arn : "",
           var.enable_hitl ? aws_lambda_function.hitl_status_update[0].arn : ""
         ])
@@ -1057,4 +1059,204 @@ resource "aws_iam_role_policy_attachment" "hitl_status_update_kms_attachment" {
   count      = var.enable_hitl ? 1 : 0
   role       = aws_iam_role.hitl_status_update_lambda[0].name
   policy_arn = aws_iam_policy.kms_policy.arn
+}
+
+# Rule Validation Lambda IAM Roles (v0.4.13)
+
+# Rule Validation Function IAM Role
+resource "aws_iam_role" "rule_validation_lambda" {
+  count = var.enable_rule_validation ? 1 : 0
+  name  = "${local.name_prefix}-rule-validation-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "rule_validation_lambda" {
+  count = var.enable_rule_validation ? 1 : 0
+  name  = "${local.name_prefix}-rule-validation-lambda-policy"
+  role  = aws_iam_role.rule_validation_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = [
+          "${local.working_bucket_arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          local.configuration_table_arn,
+          local.tracking_table_arn,
+          "${local.configuration_table_arn}/index/*",
+          "${local.tracking_table_arn}/index/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/IDPProcessor" = "bedrock-llm"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = local.metric_namespace
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "rule_validation_lambda_basic" {
+  count      = var.enable_rule_validation ? 1 : 0
+  role       = aws_iam_role.rule_validation_lambda[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "rule_validation_lambda_kms" {
+  count      = var.enable_rule_validation ? 1 : 0
+  role       = aws_iam_role.rule_validation_lambda[0].name
+  policy_arn = aws_iam_policy.kms_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "rule_validation_lambda_vpc" {
+  count      = var.enable_rule_validation && length(local.vpc_subnet_ids) > 0 ? 1 : 0
+  role       = aws_iam_role.rule_validation_lambda[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+# Rule Validation Orchestration Function IAM Role
+resource "aws_iam_role" "rule_validation_orchestration_lambda" {
+  count = var.enable_rule_validation ? 1 : 0
+  name  = "${local.name_prefix}-rule-validation-orchestration-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "rule_validation_orchestration_lambda" {
+  count = var.enable_rule_validation ? 1 : 0
+  name  = "${local.name_prefix}-rule-validation-orchestration-lambda-policy"
+  role  = aws_iam_role.rule_validation_orchestration_lambda[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          var.enable_rule_validation ? aws_lambda_function.rule_validation[0].arn : ""
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Resource = local.s3_object_arns
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          local.configuration_table_arn,
+          local.tracking_table_arn,
+          "${local.configuration_table_arn}/index/*",
+          "${local.tracking_table_arn}/index/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = local.metric_namespace
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "rule_validation_orchestration_lambda_basic" {
+  count      = var.enable_rule_validation ? 1 : 0
+  role       = aws_iam_role.rule_validation_orchestration_lambda[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "rule_validation_orchestration_lambda_kms" {
+  count      = var.enable_rule_validation ? 1 : 0
+  role       = aws_iam_role.rule_validation_orchestration_lambda[0].name
+  policy_arn = aws_iam_policy.kms_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "rule_validation_orchestration_lambda_vpc" {
+  count      = var.enable_rule_validation && length(local.vpc_subnet_ids) > 0 ? 1 : 0
+  role       = aws_iam_role.rule_validation_orchestration_lambda[0].name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }

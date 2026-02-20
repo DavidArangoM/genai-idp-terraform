@@ -21,18 +21,16 @@ resource "aws_lambda_function" "ocr" {
 
   environment {
     variables = {
-      LOG_LEVEL                     = local.log_level
-      METRIC_NAMESPACE              = local.metric_namespace
-      MAX_WORKERS                   = var.ocr_max_workers
-      CONFIGURATION_TABLE_NAME      = local.configuration_table_name
-      TRACKING_TABLE                = local.tracking_table_name
-      WORKING_BUCKET                = local.working_bucket_name
-      DOCUMENT_TRACKING_MODE        = local.api_id != null ? "appsync" : "dynamodb"
-      APPSYNC_API_URL               = local.api_graphql_url != null ? local.api_graphql_url : ""
-      LAMBDA_HOOK_ARN               = var.enable_lambda_hook ? var.lambda_hook_function_arn : ""
-      ENABLE_LAMBDA_HOOK            = var.enable_lambda_hook ? "true" : "false"
-      ENABLE_CONFIG_VERSIONING      = var.enable_configuration_versioning ? "true" : "false"
-      DEFAULT_CONFIG_VERSION        = var.default_config_version
+      LOG_LEVEL                = local.log_level
+      METRIC_NAMESPACE         = local.metric_namespace
+      MAX_WORKERS              = var.ocr_max_workers
+      CONFIGURATION_TABLE_NAME = local.configuration_table_name
+      TRACKING_TABLE           = local.tracking_table_name
+      WORKING_BUCKET           = local.working_bucket_name
+      DOCUMENT_TRACKING_MODE   = local.api_id != null ? "appsync" : "dynamodb"
+      APPSYNC_API_URL          = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED = "true"
+      PROCESSING_CONTEXT       = "ocr"
     }
   }
 
@@ -69,19 +67,18 @@ resource "aws_lambda_function" "classification" {
 
   environment {
     variables = {
-      METRIC_NAMESPACE              = local.metric_namespace
-      MAX_WORKERS                   = var.classification_max_workers
-      TRACKING_TABLE                = local.tracking_table_name
-      CONFIGURATION_TABLE_NAME      = local.configuration_table_name
-      LOG_LEVEL                     = local.log_level
-      WORKING_BUCKET                = local.working_bucket_name
-      GUARDRAIL_ID_AND_VERSION      = var.classification_guardrail != null ? var.classification_guardrail.guardrail_id : ""
-      DOCUMENT_TRACKING_MODE        = local.api_id != null ? "appsync" : "dynamodb"
-      APPSYNC_API_URL               = local.api_graphql_url != null ? local.api_graphql_url : ""
-      LAMBDA_HOOK_ARN               = var.enable_lambda_hook ? var.lambda_hook_function_arn : ""
-      ENABLE_LAMBDA_HOOK            = var.enable_lambda_hook ? "true" : "false"
-      ENABLE_CONFIG_VERSIONING      = var.enable_configuration_versioning ? "true" : "false"
-      DEFAULT_CONFIG_VERSION        = var.default_config_version
+      METRIC_NAMESPACE         = local.metric_namespace
+      MAX_WORKERS              = var.classification_max_workers
+      TRACKING_TABLE           = local.tracking_table_name
+      CONFIGURATION_TABLE_NAME = local.configuration_table_name
+      LOG_LEVEL                = local.log_level
+      WORKING_BUCKET           = local.working_bucket_name
+      GUARDRAIL_ID_AND_VERSION = var.classification_guardrail != null ? var.classification_guardrail.guardrail_id : ""
+      DOCUMENT_TRACKING_MODE   = local.api_id != null ? "appsync" : "dynamodb"
+      APPSYNC_API_URL          = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED = "true"
+      PROCESSING_CONTEXT       = "classification"
+      MAX_PAGES_FOR_CLASSIFICATION = var.max_pages_for_classification
     }
   }
 
@@ -118,6 +115,8 @@ resource "aws_lambda_function" "extraction" {
       TRACKING_TABLE           = local.tracking_table_name
       DOCUMENT_TRACKING_MODE   = local.api_id != null ? "appsync" : "dynamodb"
       APPSYNC_API_URL          = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED = "true"
+      PROCESSING_CONTEXT       = "extraction"
     }
   }
 
@@ -152,6 +151,8 @@ resource "aws_lambda_function" "process_results" {
       WORKING_BUCKET         = local.working_bucket_name
       DOCUMENT_TRACKING_MODE = local.api_id != null ? "appsync" : "dynamodb"
       APPSYNC_API_URL        = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED = "true"
+      PROCESSING_CONTEXT     = "process_results"
     }
   }
 
@@ -190,6 +191,8 @@ resource "aws_lambda_function" "summarization" {
       TRACKING_TABLE           = local.tracking_table_name
       DOCUMENT_TRACKING_MODE   = local.api_id != null ? "appsync" : "dynamodb"
       APPSYNC_API_URL          = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED = "true"
+      PROCESSING_CONTEXT       = "summarization"
     }
   }
 
@@ -268,6 +271,8 @@ resource "aws_lambda_function" "assessment" {
       TRACKING_TABLE           = local.tracking_table_name
       DOCUMENT_TRACKING_MODE   = local.api_id != null ? "appsync" : "dynamodb"
       APPSYNC_API_URL          = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED = "true"
+      PROCESSING_CONTEXT       = "assessment"
     }
   }
 
@@ -462,6 +467,121 @@ data "archive_file" "hitl_status_update_lambda" {
   type        = "zip"
   source_dir  = "${path.module}/../../../sources/patterns/pattern-2/src/hitl-status-update-function"
   output_path = "${path.module}/hitl_status_update_function.zip"
+
+  depends_on = [null_resource.create_module_build_dir]
+}
+
+# Rule Validation Function (for v0.4.13)
+resource "aws_lambda_function" "rule_validation" {
+  count = var.enable_rule_validation ? 1 : 0
+
+  function_name = "${local.name_prefix}-rule-validation"
+  role          = aws_iam_role.rule_validation_lambda[0].arn
+  handler       = "index.handler"
+  runtime       = "python3.12"
+  timeout       = 900
+  memory_size   = 3008
+
+  filename         = data.archive_file.rule_validation_lambda.output_path
+  source_code_hash = data.archive_file.rule_validation_lambda.output_base64sha256
+
+  layers = [var.idp_common_layer_arn]
+
+  kms_key_arn = var.encryption_key_arn
+
+  environment {
+    variables = {
+      LOG_LEVEL                    = local.log_level
+      METRIC_NAMESPACE             = local.metric_namespace
+      TRACKING_TABLE               = local.tracking_table_name
+      CONFIGURATION_TABLE_NAME     = local.configuration_table_name
+      WORKING_BUCKET               = local.working_bucket_name
+      DOCUMENT_TRACKING_MODE       = local.api_id != null ? "appsync" : "dynamodb"
+      APPSYNC_API_URL              = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED = "true"
+      PROCESSING_CONTEXT           = "rule_validation"
+    }
+  }
+
+  tracing_config {
+    mode = var.lambda_tracing_mode
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_log_group" "rule_validation_lambda" {
+  count = var.enable_rule_validation ? 1 : 0
+
+  name              = "/aws/lambda/${aws_lambda_function.rule_validation[0].function_name}"
+  retention_in_days = local.log_retention_days
+  kms_key_id        = local.encryption_key_arn
+
+  tags = local.common_tags
+}
+
+# Rule Validation Orchestration Function
+resource "aws_lambda_function" "rule_validation_orchestration" {
+  count = var.enable_rule_validation ? 1 : 0
+
+  function_name = "${local.name_prefix}-rule-validation-orchestration"
+  role          = aws_iam_role.rule_validation_orchestration_lambda[0].arn
+  handler       = "index.handler"
+  runtime       = "python3.12"
+  timeout       = 900
+  memory_size   = 1024
+
+  filename         = data.archive_file.rule_validation_orchestration_lambda.output_path
+  source_code_hash = data.archive_file.rule_validation_orchestration_lambda.output_base64sha256
+
+  layers = [var.idp_common_layer_arn]
+
+  kms_key_arn = var.encryption_key_arn
+
+  environment {
+    variables = {
+      LOG_LEVEL                       = local.log_level
+      METRIC_NAMESPACE                = local.metric_namespace
+      TRACKING_TABLE                  = local.tracking_table_name
+      CONFIGURATION_TABLE_NAME        = local.configuration_table_name
+      WORKING_BUCKET                  = local.working_bucket_name
+      RULE_VALIDATION_FUNCTION_ARN    = aws_lambda_function.rule_validation[0].arn
+      DOCUMENT_TRACKING_MODE          = local.api_id != null ? "appsync" : "dynamodb"
+      APPSYNC_API_URL                 = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_COST_METERING_ENABLED    = "true"
+      PROCESSING_CONTEXT              = "rule_validation_orchestration"
+    }
+  }
+
+  tracing_config {
+    mode = var.lambda_tracing_mode
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_log_group" "rule_validation_orchestration_lambda" {
+  count = var.enable_rule_validation ? 1 : 0
+
+  name              = "/aws/lambda/${aws_lambda_function.rule_validation_orchestration[0].function_name}"
+  retention_in_days = local.log_retention_days
+  kms_key_id        = local.encryption_key_arn
+
+  tags = local.common_tags
+}
+
+data "archive_file" "rule_validation_lambda" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../sources/patterns/pattern-2/src/rule-validation-function"
+  output_path = "${path.module}/rule_validation_function.zip"
+
+  depends_on = [null_resource.create_module_build_dir]
+}
+
+data "archive_file" "rule_validation_orchestration_lambda" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../sources/patterns/pattern-2/src/rule-validation-orchestration-function"
+  output_path = "${path.module}/rule_validation_orchestration_function.zip"
 
   depends_on = [null_resource.create_module_build_dir]
 }
