@@ -21,14 +21,18 @@ resource "aws_lambda_function" "ocr" {
 
   environment {
     variables = {
-      LOG_LEVEL                = local.log_level
-      METRIC_NAMESPACE         = local.metric_namespace
-      MAX_WORKERS              = var.ocr_max_workers
-      CONFIGURATION_TABLE_NAME = local.configuration_table_name
-      TRACKING_TABLE           = local.tracking_table_name
-      WORKING_BUCKET           = local.working_bucket_name
-      DOCUMENT_TRACKING_MODE   = local.api_id != null ? "appsync" : "dynamodb"
-      APPSYNC_API_URL          = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LOG_LEVEL                     = local.log_level
+      METRIC_NAMESPACE              = local.metric_namespace
+      MAX_WORKERS                   = var.ocr_max_workers
+      CONFIGURATION_TABLE_NAME      = local.configuration_table_name
+      TRACKING_TABLE                = local.tracking_table_name
+      WORKING_BUCKET                = local.working_bucket_name
+      DOCUMENT_TRACKING_MODE        = local.api_id != null ? "appsync" : "dynamodb"
+      APPSYNC_API_URL               = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_HOOK_ARN               = var.enable_lambda_hook ? var.lambda_hook_function_arn : ""
+      ENABLE_LAMBDA_HOOK            = var.enable_lambda_hook ? "true" : "false"
+      ENABLE_CONFIG_VERSIONING      = var.enable_configuration_versioning ? "true" : "false"
+      DEFAULT_CONFIG_VERSION        = var.default_config_version
     }
   }
 
@@ -65,15 +69,19 @@ resource "aws_lambda_function" "classification" {
 
   environment {
     variables = {
-      METRIC_NAMESPACE         = local.metric_namespace
-      MAX_WORKERS              = var.classification_max_workers
-      TRACKING_TABLE           = local.tracking_table_name
-      CONFIGURATION_TABLE_NAME = local.configuration_table_name
-      LOG_LEVEL                = local.log_level
-      WORKING_BUCKET           = local.working_bucket_name
-      GUARDRAIL_ID_AND_VERSION = var.classification_guardrail != null ? var.classification_guardrail.guardrail_id : ""
-      DOCUMENT_TRACKING_MODE   = local.api_id != null ? "appsync" : "dynamodb"
-      APPSYNC_API_URL          = local.api_graphql_url != null ? local.api_graphql_url : ""
+      METRIC_NAMESPACE              = local.metric_namespace
+      MAX_WORKERS                   = var.classification_max_workers
+      TRACKING_TABLE                = local.tracking_table_name
+      CONFIGURATION_TABLE_NAME      = local.configuration_table_name
+      LOG_LEVEL                     = local.log_level
+      WORKING_BUCKET                = local.working_bucket_name
+      GUARDRAIL_ID_AND_VERSION      = var.classification_guardrail != null ? var.classification_guardrail.guardrail_id : ""
+      DOCUMENT_TRACKING_MODE        = local.api_id != null ? "appsync" : "dynamodb"
+      APPSYNC_API_URL               = local.api_graphql_url != null ? local.api_graphql_url : ""
+      LAMBDA_HOOK_ARN               = var.enable_lambda_hook ? var.lambda_hook_function_arn : ""
+      ENABLE_LAMBDA_HOOK            = var.enable_lambda_hook ? "true" : "false"
+      ENABLE_CONFIG_VERSIONING      = var.enable_configuration_versioning ? "true" : "false"
+      DEFAULT_CONFIG_VERSION        = var.default_config_version
     }
   }
 
